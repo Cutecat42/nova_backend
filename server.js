@@ -144,9 +144,6 @@ const hindsightClient = new HindsightClient({
   baseUrl: process.env.HINDSIGHT_URL || "http://localhost:8888" 
 });
 
-hindsightClient.createBank("nova-memory").catch(() => {
-});
-
 app.post(
   "/api/hindsight/:action",
   authenticateBackend,
@@ -155,7 +152,10 @@ app.post(
     console.log(`\n🕵️ HINDSIGHT SDK HIT! Action requested: ${action}`);
 
     try {
-      const bankId = "nova-memory";
+      const userId = String(req.body.user_id || "").replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!userId) return res.status(400).json({ error: "user_id required" });
+      const bankId = `nova-memory-${userId}`;
+      console.log(`🕵️ Hindsight ${action} → bank: ${bankId}`);
       let data;
 
       if (action === "retain") {
@@ -163,8 +163,7 @@ app.post(
           data = await hindsightClient.retain(bankId, req.body.text);
         } catch (retainErr) {
           if (retainErr.message.includes("not found")) {
-            console.log("⚠️ Bank missing. Auto-creating 'nova-memory'...");
-            await hindsightClient.createBank(bankId);
+            console.log("⚠️ Bank missing. Auto-creating '${bankId}'...");
             data = await hindsightClient.retain(bankId, req.body.text);
           } else {
             throw retainErr;
