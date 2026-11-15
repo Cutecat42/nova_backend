@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import { HindsightClient } from "@vectorize-io/hindsight-client";
 
 dotenv.config();
 
@@ -14,6 +15,8 @@ const PORT = process.env.PORT || 3001;
 const OLLAMA_URL = process.env.OLLAMA_URL;
 const NOVA_BACKEND_SECRET = process.env.NOVA_BACKEND_SECRET;
 const CLOUDFLARE_API_URL = process.env.CLOUDFLARE_API_URL;
+
+const HINDSIGHT_URL = process.env.HINDSIGHT_URL || "http://localhost:8888";
 
 // ==========================================
 // BACKEND AUTHENTICATION
@@ -129,6 +132,64 @@ app.post(
       res.status(502).json({
         error: "Could not generate embeddings",
       });
+    }
+  }
+);
+
+// ==========================================
+// 3.5 HINDSIGHT MEMORY PROXY
+// ==========================================
+
+const hindsightClient = new HindsightClient({ 
+  baseUrl: process.env.HINDSIGHT_URL || "http://localhost:8888" 
+});
+
+hindsightClient.createBank("nova-memory").catch(() => {
+});
+
+app.post(
+  "/api/hindsight/:action",
+  authenticateBackend,
+  async (req, res) => {
+    const action = req.params.action;
+    console.log(`\n🕵️ HINDSIGHT SDK HIT! Action requested: ${action}`);
+
+    try {
+      const bankId = "nova-memory";
+      let data;
+
+      if (action === "retain") {
+        try {
+          data = await hindsightClient.retain(bankId, req.body.text);
+        } catch (retainErr) {
+          if (retainErr.message.includes("not found")) {
+            console.log("⚠️ Bank missing. Auto-creating 'nova-memory'...");
+            await hindsightClient.createBank(bankId);
+            data = await hindsightClient.retain(bankId, req.body.text);
+          } else {
+            throw retainErr;
+          }
+        }
+      } else if (action === "recall") {
+        try {
+          data = await hindsightClient.recall(bankId, req.body.query);
+        } catch (recallErr) {
+          if (recallErr.message.includes("not found")) {
+            console.log("⚠️ Bank not found (no memory yet). Returning empty.");
+            return res.status(200).json({ results: [] });
+          }
+          throw recallErr;
+        }
+      } else {
+        return res.status(404).json({ error: "Unknown action" });
+      }
+
+      console.log(`✅ Hindsight SDK replied successfully!`);
+      res.status(200).json(data);
+
+    } catch (error) {
+      console.error("❌ Hindsight SDK Error:", error);
+      res.status(502).json({ error: error.message });
     }
   }
 );
